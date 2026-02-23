@@ -18,27 +18,30 @@ python insertion_finder.py -q <query file> -run 'web'
 python insertion_finder.py -q <query file> -run 'local' -d <database file> -tab <BLASTn table file>
 python insertion_finder.py -q <query file> -tab <BLASTn table file> 
 ```
-### Mandatory parameters:
+
+### Mandatory Parameters
+These parameters must be specified in the command line:
 ```
--q <file name>      Sequence to search with (fasta or multifasta file)
--run <local|web>    Choice of running local or web BLAST search
--d <file name>      Database to BLAST against (multifasta file)
+-q <file name>      The DNA sequence containing the inserted element.
+-d <file name>      The BLAST database (note      this is only valid when using -run local).
+-run <local|remote>      Specifies whether the BLAST search should run locally or remotely.
 ```
 
-### Optional parameters:
+### Optional Parameters
 ```
--conf <file name>   Configuration file
--tab <file name>    BLASTn search result table (fields: qseqid,sseqid,qcovs,qlen,slen,qstart,qend)(table file)
--org <integer>      Taxid(s) to restrict the database of the BLASTn search
--out <path|name>    Output directory
--minlen <integer>   Minimum element's length in base pairs(bp) (default: 5000)
--maxlen <integer>   Maximum element's length in base pairs(bp) (default: 50000)
--mincov <integer>   Minimum % query coverage per subject (default: 30)
--maxcov <integer>   Maximum % query coverage per subject (default: 90)
--enddist <integer>  Maximum distance between block end and query end in base pairs(bp) (default: 50)
--cpu <integer>      Number of threads to execute the blastn search (default: 10)
--color <string>     Element RGB color that is shown by the feature table, three integers between 0 and 255 separated by commas (default: 255,0,0)
-``` 
+-cpu <integer>      Number of threads to execute the local BLASTN search (default: half of the total number of processors on the local machine).
+-color <RGB number codes>      The color of the element used as a qualifier in the annotation feature table. Defined using RGB codes from 0-255 separated by commas (default: 255,0,0).
+-enddist <integer>      Maximum allowed distance (in base pairs) between the 5′ or 3′ end of an alignment block and the query terminus (default: 50).
+-minlen <integer>      Minimum accepted length of the element in base pairs (default: 4000).
+-maxlen <integer>      Maximum accepted length of the element in base pairs (default: 50000).
+-mincov <integer>      Minimum percentage query coverage per subject (default: 30).
+-maxcov <integer>      Maximum percentage query coverage per subject (default: 90).
+-max_remote_proc <integer>      Maximum number of BLAST processes on a remote server (default: 1).
+-max_batch_size <integer>      Maximum length of concatenated query sequences per batch for remote BLAST searches, used to prevent server overloading (default: 1,000,000).
+-org <Taxonomy identifier>      TaxID(s) used to restrict the database for remote BLASTN searches (e.g., -org 2,2157 for Bacteria and Archaea).
+-out <name>      Output directory name (default: output_dir1).
+-tab <filename>      Filename of a previous result of a BLASTN search.
+```
 
 ## Contact
 

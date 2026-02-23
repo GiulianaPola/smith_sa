@@ -5,13 +5,10 @@
 import os
 from datetime import datetime
 
-# Get the path of the current file
 current_file = __file__
 
-# Get last modified time as a timestamp
 last_modified_timestamp = os.path.getmtime(current_file)
 
-# Convert timestamp to datetime object
 last_modified_datetime = datetime.fromtimestamp(last_modified_timestamp)
 # print("Last modified datetime of this script:", last_modified_datetime)
 
@@ -25,6 +22,9 @@ from Bio import SeqIO
 from datetime import datetime
 import argparse
 import shutil
+import os
+import math
+from concurrent.futures import ThreadPoolExecutor
 
 def warn_with_traceback(msg, cat, fname, lno, file=None, line=None):
     """
@@ -34,14 +34,29 @@ def warn_with_traceback(msg, cat, fname, lno, file=None, line=None):
     traceback.print_stack(file=logfh)
     logfh.write(warnings.formatwarning(msg, cat, fname, lno, line))
     logfh.flush()
+    
+def get_default_cpu_count():
+    """
+    Detects logical threads and returns half, minimum 1.
+    Prioritizes affinity-aware counts for container/HPC compatibility.
+    """
+    try:
+        # Respects CPU affinity (important for Docker/Slurm)
+        logical_threads = len(os.sched_getaffinity(0))
+    except AttributeError:
+        # Fallback for Windows/macOS
+        logical_threads = os.cpu_count() or 1
+    
+    return max(1, math.floor(logical_threads / 2)), logical_threads
 
 warnings.showwarning = warn_with_traceback
 
 start_time = datetime.now()
 cwd_path = os.path.abspath(os.getcwd())
 params = dict()
+DEFAULT_CPU, TOTAL_THREADS = get_default_cpu_count()
 
-VERSION = "2.8"
+VERSION = "2.9"
 
 HELP_MSG = 'insertion_finder v{} - element insertion finder in a genome through a BLAST search\n'.format(VERSION)
 HELP_MSG += '(c) 2021. Arthur Gruber & Giuliana Pola\n'
@@ -58,13 +73,15 @@ HELP_MSG += '\nOptional parameters:\n'
 HELP_MSG += '-tab \tBLASTn search result table (fields: qseqid,sseqid,qcovs,qlen,slen,qstart,qend)\n'
 HELP_MSG += '-org \tTaxid(s) to restrict the database of the BLASTn search (for -run web)\n'
 HELP_MSG += "-out \tOutput directory (default: output_dir1)\n"
-HELP_MSG += "-enddist \tMaximum distance between block tip and query tip in base pairs(bp) (default: 50)\n"
+HELP_MSG += "-enddist \tMaximum distance between block end and query end in base pairs(bp) (default: 50)\n"
 HELP_MSG += "-minlen \tMinimum element's length in base pairs(bp) (default: 4000)\n"
 HELP_MSG += "-maxlen \tMaximum element's length in base pairs(bp) (default: 50000)\n"
 HELP_MSG += "-mincov \tMinimum % query coverage per subject (default: 30)\n"
 HELP_MSG += "-maxcov \tMaximum % query coverage per subject (default: 90)\n"
-HELP_MSG += "-cpu \tNumber of threads to execute the local blastn search (default: 18)\n"
-HELP_MSG += "-color \tThe RGB color of the element that is shown by the feature table, three integers between 0 and 255 separated by commas (default: 255,0,0)"
+HELP_MSG += "-cpu \tNumber of threads for local BLAST (default: {} [half of {} detected threads])\n".format(DEFAULT_CPU, TOTAL_THREADS)
+HELP_MSG += "-color \tThe RGB color of the element that is shown by the feature table, three integers between 0 and 255 separated by commas (default: 255,0,0)\n"
+HELP_MSG += "-max_remote_proc \tMax concurrent web BLAST processes (default: 1)\n"
+HELP_MSG += "-max_batch_size \tMax base pairs per BLAST batch (default: 1000000)\n"
 
 parser = argparse.ArgumentParser(add_help=False)
 parser.add_argument('-q')
@@ -80,9 +97,9 @@ parser.add_argument('-maxlen')
 parser.add_argument('-mincov')
 parser.add_argument('-maxcov')
 parser.add_argument('-run')
-parser.add_argument('-max_web_workers')
+parser.add_argument('-max_remote_proc')
 parser.add_argument('-web_inter_batch_delay')
-parser.add_argument('-max_bp_batch_size')
+parser.add_argument('-max_batch_size')
 parser.add_argument('-version', action='store_true')
 parser.add_argument('-h', '--help', action='store_true')
 args = parser.parse_args()
@@ -202,12 +219,14 @@ def validate_args(args):
             sys.stderr.write("ERROR: -{} must be an integer.\n".format(name))
             return None, False
 
-    params['cpu'], is_valid = validate_integer(args.cpu, 'cpu', 18, min_val=1) if is_valid else (None, False)
+    params['cpu'], is_valid = validate_integer(args.cpu, 'cpu', DEFAULT_CPU, min_val=1)
     params['enddist'], is_valid = validate_integer(args.enddist, 'enddist', 50, min_val=0) if is_valid else (None, False)
     params['minlen'], is_valid = validate_integer(args.minlen, 'minlen', 4000, min_val=0) if is_valid else (None, False)
     params['maxlen'], is_valid = validate_integer(args.maxlen, 'maxlen', 50000, min_val=0) if is_valid else (None, False)
     params['mincov'], is_valid = validate_integer(args.mincov, 'mincov', 30, min_val=0, max_val=100) if is_valid else (None, False)
     params['maxcov'], is_valid = validate_integer(args.maxcov, 'maxcov', 90, min_val=0, max_val=100) if is_valid else (None, False)
+    params['max_remote_proc'], is_valid = validate_integer(args.max_remote_proc, 'max_remote_proc', 1, min_val=1, max_val=10)
+    params['max_batch_size'], is_valid = validate_integer(args.max_batch_size, 'max_batch_size', 1000000, min_val=10000)
 
     if is_valid and params['minlen'] >= params['maxlen']:
         sys.stderr.write("ERROR: -minlen must be less than -maxlen.\n")
@@ -256,7 +275,7 @@ def split_fasta(fasta_fpath):
     Splits a FASTA file into memory-efficient batches based on total base pairs.
     """
     log.write("INFO: Starting to split FASTA file '{}' into batches...\n".format(fasta_fpath))
-    MAX_BP_PER_BATCH = params.get('max_bp_batch_size', 1000000)
+    MAX_BP_PER_BATCH = params.get('max_batch_size', 1000000)
     parts_dir = os.path.join(params["out"], "query_parts")
     log.write("INFO: Creating directory for split query files: '{}'\n".format(parts_dir))
     try:
@@ -322,11 +341,10 @@ def split_fasta(fasta_fpath):
 
 def build_blastn_cmd(blast_params, blast_args, n_threads):
     """
-    Monta a lista de argumentos para chamar o blastn via subprocess.
+    Build the list of arguments to call blastn via subprocess.
     """
     cmd = ["blastn"]
 
-    # parâmetros comuns
     cmd.extend(["-query", blast_args["query"]])
     cmd.extend(["-out", blast_args["out"]])
     cmd.extend(["-outfmt", blast_args["outfmt"]])
@@ -337,13 +355,11 @@ def build_blastn_cmd(blast_params, blast_args, n_threads):
     run_mode = blast_params.get("run")
 
     if run_mode == "web":
-        # BLAST remoto no nt
         cmd.extend(["-db", "nt"])
         cmd.append("-remote")
         if "org" in blast_params and blast_params["org"]:
             cmd.extend(["-entrez_query", blast_params["org"]])
     elif run_mode == "local":
-        # BLAST local
         cmd.extend(["-db", blast_params.get("d")])
         if n_threads and n_threads > 1:
             cmd.extend(["-num_threads", str(n_threads)])
@@ -374,7 +390,6 @@ def run_blast_batch(batch_fpath, batch_idx, total_batches, blast_params, out_fpa
             "blast_batch_{}.tab".format(batch_idx + 1)
         )
 
-    # argumentos equivalentes aos usados no wrapper antigo
     blast_args = {
         'query': batch_fpath,
         "outfmt": "7 qseqid sseqid qcovs qlen slen qstart qend evalue bitscore",
@@ -384,7 +399,7 @@ def run_blast_batch(batch_fpath, batch_idx, total_batches, blast_params, out_fpa
         "evalue": "1e-5",
     }
 
-    # threads apenas para modo local
+    # threads only for local mode
     if blast_params.get('run') == 'local':
         n_threads = max(1, int(blast_params.get('cpu', 1)))
     else:
@@ -468,7 +483,6 @@ def run_blast_batch(batch_fpath, batch_idx, total_batches, blast_params, out_fpa
         except subprocess.CalledProcessError as e:
             err_detail = e.stderr or e.output or str(e)
 
-            # erros permanentes: não faz retry
             if (
                 "BLAST query/options error" in err_detail
                 or "Argument" in err_detail
@@ -541,10 +555,10 @@ def run_blast(params, query_fpath, out_fname="blastn.tab", t_start=None):
     params['current_blastn_parts_dir'] = blast_parts_dir
     t_start = t_start or datetime.now()
     try:
-        max_bp = params.get('max_bp_batch_size', 1000000)
+        max_bp = params.get('max_batch_size', 1000000)
         total_bp = sum(len(rec.seq) for rec in SeqIO.parse(query_fpath, "fasta"))
         num_seqs = len(list(SeqIO.parse(query_fpath, "fasta")))
-        if total_bp <= max_bp or num_seqs <= 1:
+        if total_bp <= max_bp or num_seqs <= 1 or params.get('run') == 'local':
             if log:
                 log.write("INFO: Single query or multiple query is within max batch size limits. Skipping splitting and using original query file.\n")
             status, out_path, _ = run_blast_batch(query_fpath, 0, 1, params, out_fpath=final_blast_tab)
@@ -561,20 +575,37 @@ def run_blast(params, query_fpath, out_fname="blastn.tab", t_start=None):
                 os.makedirs(blast_parts_dir)
             result_files = []
             total_batches = len(batch_fpaths)
-            for i, batch_path in enumerate(batch_fpaths):
-                if i > 0 and params.get('run') == 'web':
-                    delay = params.get('web_inter_batch_delay', 60)
-                    if log:
-                        log.write("\nWaiting {}s before next batch...\n".format(delay))
-                    time.sleep(delay)
-                status, res_path, cpu_warn = run_blast_batch(batch_path, i, total_batches, params)
-                if status == 'SUCCESS':
-                    result_files.append(res_path)
-                if cpu_warn and params.get('run') == 'web':
-                    current_delay = params.get('web_inter_batch_delay', 60)
-                    params['web_inter_batch_delay'] = min(300, current_delay * 2 + 10)
-                    if log:
-                        log.write("WARN: CPU usage high. Delay increased to {}s.\n".format(params['web_inter_batch_delay']))
+
+            num_workers = params.get('max_remote_proc', 1)
+            base_delay = params.get('web_inter_batch_delay', 60)
+
+            effective_delay = base_delay * num_workers
+
+            if params.get('run') == 'web' and num_workers > 1:
+                log.write("INFO: Parallel Web BLAST enabled with {} workers.\n".format(num_workers))
+                log.write("INFO: Scaled inter-batch delay set to {}s.\n".format(effective_delay))
+                
+                with ThreadPoolExecutor(max_workers=num_workers) as executor:
+                    future_to_batch = {}
+                    for i, batch_path in enumerate(batch_fpaths):
+                        # Staggered submission
+                        if i > 0:
+                            time.sleep(effective_delay)
+                        
+                        future = executor.submit(
+                            run_blast_batch, batch_path, i, total_batches, params
+                        )
+                        future_to_batch[future] = batch_path
+
+                    # Collect results as they finish
+                    for future in future_to_batch:
+                        status, res_path, cpu_warn = future.result()
+                        if status == 'SUCCESS':
+                            result_files.append(res_path)
+                        # Dynamic backoff logic if CPU warnings are detected
+                        if cpu_warn:
+                            params['web_inter_batch_delay'] = min(600, params['web_inter_batch_delay'] * 2)
+            
             if not result_files:
                 sys.stderr.write("ERROR: All BLAST batches failed.\n")
                 return datetime.now() - t_start, None
@@ -943,7 +974,6 @@ def main(params, qseq_content, log, blast_log_fh):
             log.write("Appending new results to {}.\n".format(os.path.basename(final_blast_tab)))
             log.flush()
             with open(final_blast_tab, 'ab') as master_fh, open(supp_tab_path, 'rb') as extra_fh:
-                # BUG FIX: Filter *all* header lines, not just '# Fields:'
                 for line in extra_fh:
                     if not line.startswith(b'#'):
                         master_fh.write(line)
@@ -987,7 +1017,6 @@ def main(params, qseq_content, log, blast_log_fh):
         "REJECTED: No valid element found in any hit": [],
     }
 
-    # BUG FIX: Use the actual column headers from the BLAST output file
     q_id_col = 'query id'
     s_id_col = 'subject id'
     qcov_col = '% query coverage per subject'
@@ -1093,8 +1122,11 @@ def main(params, qseq_content, log, blast_log_fh):
                     status, coords, details = one_block(
                         contigs, q_len, params['enddist'], params['maxcov']
                     )
+                    elem_start, elem_end, elem_len = coords
+                    log.write("[{}] Analyzing Single Block hit ({}): Coords={}-{}, Len={}, Cov={:.2f}%, Status={}\n"
+                              .format(qid, curr_sid, elem_start, elem_end, elem_len, curr_avg_cov, status))
+
                     if status == 'TERMINAL_ELEMENT':
-                        elem_start, elem_end, elem_len = coords
                         if params['minlen'] <= elem_len <= params['maxlen']:
                             is_valid = True
                         else:
@@ -1123,9 +1155,14 @@ def main(params, qseq_content, log, blast_log_fh):
                             0,
                             "{} ({}, {:.2f}%)".format(curr_sid, details, curr_avg_cov),
                         ))
+
                 elif num_contigs > 1:
                     starts, ends = unzip_pairs(contigs)
                     elem_start, elem_end, elem_len = find_largest_gap_between_blocks(starts, ends)
+                    
+                    log.write("[{}] Analyzing Multi-Block hit ({}): GapStart={}, GapEnd={}, GapLen={}, Cov={:.2f}%\n"
+                              .format(qid, curr_sid, elem_start, elem_end, elem_len, curr_avg_cov))
+
                     if elem_len > 0:
                         if params['minlen'] <= elem_len <= params['maxlen']:
                             is_valid = True
@@ -1235,7 +1272,6 @@ if __name__ == "__main__":
                 log.write("{}: {}\n".format(pname, pval))
         log.flush()
 
-        # ler FASTA completo
         with open(params["q"], "r") as qfh:
             qseq_content = qfh.read()
         all_fasta_qids = get_fasta_query_ids(params["q"])

@@ -56,32 +56,32 @@ cwd_path = os.path.abspath(os.getcwd())
 params = dict()
 DEFAULT_CPU, TOTAL_THREADS = get_default_cpu_count()
 
-VERSION = "2.9"
+VERSION = "1.0"
 
-HELP_MSG = 'insertion_finder v{} - element insertion finder in a genome through a BLAST search\n'.format(VERSION)
-HELP_MSG += '(c) 2021. Arthur Gruber & Giuliana Pola\n'
-HELP_MSG += 'For the latest version acess: https://github.com/GiulianaPola/insertion_finder\n'
-HELP_MSG += 'Usage: insertion_finder.py -q -d -run local\n'
-HELP_MSG += '\tinsertion_finder.py -q -d -run local -tab \n'
-HELP_MSG += '\tinsertion_finder.py -q -run web -tab \n'
-HELP_MSG += '\tinsertion_finder.py -q -run web\n'
+HELP_MSG = 'smith_sa v{} - Sequence Mapper for Insertion boundaries in Target Hosts – Sequence Alignment\n'.format(VERSION)
+HELP_MSG += '(c) 2026. Pola, G.L. & Arthur Gruber\n'
+HELP_MSG += 'For the latest version access: https://github.com/gruberlab/smith_sa\n'
+HELP_MSG += 'Usage: smith_sa.py -q <file name> -d <file name> -run local\n'
+HELP_MSG += '\tsmith_sa.py -q <file name> -d <file name> -run local -tab <file name>\n'
+HELP_MSG += '\tsmith_sa.py -q <file name> -run remote -tab <file name>\n'
+HELP_MSG += '\tsmith_sa.py -q <file name> -run remote\n'
 HELP_MSG += '\nMandatory parameters:\n'
-HELP_MSG += '-q \tSequence to search with\n'
-HELP_MSG += '-d \tDatabase to BLAST against (for -run local)\n'
-HELP_MSG += '-run \tchoice of running local or web BLAST search\n'
+HELP_MSG += '-q \t<file name>: DNA sequence containing the inserted element\n'
+HELP_MSG += '-d \t<file name>: BLAST database (only valid when using -run local)\n'
+HELP_MSG += '-run \t<local|remote>: whether BLAST search should run locally or remotely\n'
 HELP_MSG += '\nOptional parameters:\n'
-HELP_MSG += '-tab \tBLASTn search result table (fields: qseqid,sseqid,qcovs,qlen,slen,qstart,qend)\n'
-HELP_MSG += '-org \tTaxid(s) to restrict the database of the BLASTn search (for -run web)\n'
-HELP_MSG += "-out \tOutput directory (default: output_dir1)\n"
-HELP_MSG += "-enddist \tMaximum distance between block end and query end in base pairs(bp) (default: 50)\n"
-HELP_MSG += "-minlen \tMinimum element's length in base pairs(bp) (default: 4000)\n"
-HELP_MSG += "-maxlen \tMaximum element's length in base pairs(bp) (default: 50000)\n"
-HELP_MSG += "-mincov \tMinimum % query coverage per subject (default: 30)\n"
-HELP_MSG += "-maxcov \tMaximum % query coverage per subject (default: 90)\n"
-HELP_MSG += "-cpu \tNumber of threads for local BLAST (default: {} [half of {} detected threads])\n".format(DEFAULT_CPU, TOTAL_THREADS)
-HELP_MSG += "-color \tThe RGB color of the element that is shown by the feature table, three integers between 0 and 255 separated by commas (default: 255,0,0)\n"
-HELP_MSG += "-max_remote_proc \tMax concurrent web BLAST processes (default: 1)\n"
-HELP_MSG += "-max_batch_size \tMax base pairs per BLAST batch (default: 1000000)\n"
+HELP_MSG += '-cpu \t<integer>: Number of threads to execute the local BLASTN search (default: {} [half of {} detected threads])\n'.format(DEFAULT_CPU, TOTAL_THREADS)
+HELP_MSG += '-color \t<RGB number codes>: The color of the element to be used as a qualifier in the annotation file, separated by commas (default: 255,0,0)\n'
+HELP_MSG += '-enddist \t<integer>: Maximum allowed distance (in base pairs, bp) between the 5' or 3' end of an alignment block and the query terminus (default: 50)\n'
+HELP_MSG += '-minlen \t<integer>: Minimum accepted length of the element (bp) (default: 4000)\n'
+HELP_MSG += '-maxlen \t<integer>: Maximum accepted length of the element (bp) (default: 50000)\n'
+HELP_MSG += '-mincov \t<integer>: Minimum % query coverage per subject (default: 30)\n'
+HELP_MSG += '-maxcov \t<integer>: Maximum % query coverage per subject (default: 90)\n'
+HELP_MSG += '-max_remote_proc \t<integer>: Maximum number of BLAST processes in a remote server (default: 1)\n'
+HELP_MSG += '-max_batch_size \t<integer>: Maximum length of concatenated query sequences per batch for remote BLAST searches (default: 1000000)\n'
+HELP_MSG += '-org \t<Taxonomy identifier>: TaxID(s) to restrict the database for BLASTN searches (when using -run remote)\n'
+HELP_MSG += '-out \t<name>: Output directory name (default: output_dir1)\n'
+HELP_MSG += '-tab \t<filename>: Filename of a previous result of a BLASTN search\n'
 
 parser = argparse.ArgumentParser(add_help=False)
 parser.add_argument('-q')
@@ -1028,7 +1028,7 @@ def main(params, qseq_content, log, blast_log_fh):
     coordinates_fpath = os.path.join(params["out"], 'elements.csv')
 
     with open(summary_fpath, 'w') as summ_fh:
-        summ_fh.write('insertion_finder v{}\n'.format(VERSION))
+        summ_fh.write('smith_sa v{}\n'.format(VERSION))
         summ_fh.write("\nQuery file: {}".format(params["q"]))
         if args.tab:
             summ_fh.write("\nOriginal BLAST table: {}".format(args.tab))
@@ -1257,10 +1257,10 @@ if __name__ == "__main__":
         blast_log_fh.write("\n=== New Run at {} ===\n".format(datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
         blast_log_fh.flush()
 
-        log.write("insertion_finder v{}\n".format(VERSION))
+        log.write("smith_sa v{}\n".format(VERSION))
         log.write("Last modified datetime of this script: {}\n".format(str(last_modified_datetime)))
         log.write("(c) 2021. Arthur Gruber & Giuliana Pola\n")
-        log.write("https://github.com/GiulianaPola/insertion_finder\n")
+        log.write("https://github.com/GiulianaPola/smith_sa\n")
         log.write("Run started at {}\n".format(start_time.strftime("%Y-%m-%d, %H:%M:%S")))
         user = os.getlogin() if hasattr(os, "getlogin") else os.environ.get("USER", "N/A")
         log.write("User: {}\n".format(user))
@@ -1330,6 +1330,7 @@ if __name__ == "__main__":
                     log.write("  {}\n".format(", ".join(displaylist)))
             log.write("Run finished at: {}\n".format(datetime.now().strftime("%Y-%m-%d, %H:%M:%S")))
             log.write("Total execution time: {}\n".format(datetime.now() - start_time))
+            log.write("\nEnd of execution")
             log.flush()
             log.close()
 
@@ -1338,4 +1339,4 @@ if __name__ == "__main__":
             blast_log_fh.flush()
             blast_log_fh.close()
 
-        print("Done.")
+        print("\nEnd of execution")

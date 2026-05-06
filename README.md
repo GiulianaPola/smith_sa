@@ -1,22 +1,24 @@
-# insertion_finder - element insertion finder in a genome through a BLAST search
+# smith_sa - Sequence Mapper for Insertion boundaries in Target Hosts – Sequence Alignment
 
-Insertion_finder is a tool in Python that performs similarity searches against genomic nucleotide sequences and automatically analyzes the results, identifying occurrences without the presence of the element. By comparing the sequences with and without the element, it is possible to accurately determine the 5' and 3' insertion points. 
+smith_sa is a tool used for the precise determination of element insertion sites in host genomes via sequence alignments.
 
-<img src="insertion_finder_pipeline.jpg" alt="insertion_finder_pipeline" width="700" />
+<img src="smith_sa_pipeline.jpg" alt="smith_sa_pipeline" width="700" />
 
 ##   Instalation
 
-Insertion_finder does not need to be installed. The user should only download the insertion_finder.py file.
+The program consists of a single executable file and does not require any formal installation procedure.
 
 ## Requirements
+ - Operating System: POSIX-compliant operating systems, such as UNIX and Linux distributions.
 
+- Dependencies: Requires an installed Python 3 interpreter, the BLASTN and makeblastdb applications from the BLAST package, and the SeqIO module from the Bio.Python library.
 
 ## Usage
 ```
-python insertion_finder.py -q <query file> -run 'local' -d <database file> 
-python insertion_finder.py -q <query file> -run 'web'
-python insertion_finder.py -q <query file> -run 'local' -d <database file> -tab <BLASTn table file>
-python insertion_finder.py -q <query file> -tab <BLASTn table file> 
+python smith_sa.py -q <query file> -run 'local' -d <database file> 
+python smith_sa.py -q <query file> -run 'web'
+python smith_sa.py -q <query file> -run 'local' -d <database file> -tab <BLASTn table file>
+python smith_sa.py -q <query file> -tab <BLASTn table file> 
 ```
 
 ### Mandatory Parameters
